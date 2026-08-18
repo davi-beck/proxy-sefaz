@@ -27,9 +27,15 @@ const SOAP_ACTION = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/
 
 // ── SOAP ────────────────────────────────────────────────────────────────────
 
+// CNPJ base do certificado A1 da Geo Coring — a SEFAZ exige que o CNPJ
+// informado em <CNPJ> seja o CNPJ base do certificado digital, não o da chave.
+// Configurável via env var; se não definido, usa o default da Geo Coring.
+const CNPJ_BASE = process.env.SEFAZ_CNPJ_BASE || '26478473000192';
+
 function buildSoapEnvelope(chave) {
   const uf = chave.slice(0, 2);
-  const cnpj = chave.slice(6, 20);
+  // Usa o CNPJ do certificado, não o da chave de acesso
+  const cnpj = CNPJ_BASE;
   return [
     '<?xml version="1.0" encoding="utf-8"?>',
     '<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">',
