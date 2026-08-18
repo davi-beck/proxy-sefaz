@@ -19,6 +19,7 @@
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
+const zlib = require('zlib');
 
 const PORT = process.env.PORT || 3000;
 
@@ -68,18 +69,45 @@ function parseSefazResponse(xmlBody) {
     return { ok: false, code: 'SEFAZ_REJEICAO', cStat, message: xMotivo || 'Rejeição não especificada' };
   }
 
+  // cStat 138 = documento localizado. A NF vem compactada (gzip) em base64
+  // dentro da tag <docZip> ou <resNFe>.
+  let nfXml = '';
+
+  // Tenta extrair de docZip (base64 + gzip)
+  const docZipMatch = xmlBody.match(/<docZip[^>]*>([^<]*)<\/docZip>/);
+  if (docZipMatch) {
+    try {
+      const b64content = docZipMatch[1];
+      const compressed = Buffer.from(b64content, 'base64');
+      nfXml = zlib.gunzipSync(compressed).toString('utf8');
+    } catch (e) {
+      console.error('Erro ao descompactar docZip:', e.message);
+    }
+  }
+
+  // Se não achou em docZip, tenta extrair diretamente do XML de resposta
+  if (!nfXml) {
+    const resNFeMatch = xmlBody.match(/<resNFe[^>]*>([\s\S]*?)<\/resNFe>/);
+    if (resNFeMatch) {
+      nfXml = resNFeMatch[1];
+    } else {
+      nfXml = xmlBody;
+    }
+  }
+
+  // Extrai campos da NF descompactada
   return {
     ok: true,
     cStat,
-    cnpjEmitente: extractField(xmlBody, 'CNPJ'),
-    razaoSocial: extractField(xmlBody, 'xNome'),
-    valor: extractField(xmlBody, 'vNF'),
-    dataEmissao: extractField(xmlBody, 'dhEmi') || extractField(xmlBody, 'dEmi'),
-    numero: extractField(xmlBody, 'nNF'),
-    serie: extractField(xmlBody, 'serie'),
-    modelo: extractField(xmlBody, 'mod'),
-    ie: extractField(xmlBody, 'IE'),
-    tpNF: extractField(xmlBody, 'tpNF'),
+    cnpjEmitente: extractField(nfXml, 'CNPJ') || extractField(xmlBody, 'CNPJ'),
+    razaoSocial: extractField(nfXml, 'xNome') || extractField(xmlBody, 'xNome'),
+    valor: extractField(nfXml, 'vNF') || extractField(xmlBody, 'vNF'),
+    dataEmissao: extractField(nfXml, 'dhEmi') || extractField(nfXml, 'dEmi') || extractField(xmlBody, 'dhEmi'),
+    numero: extractField(nfXml, 'nNF') || extractField(xmlBody, 'nNF'),
+    serie: extractField(nfXml, 'serie') || extractField(xmlBody, 'serie'),
+    modelo: extractField(nfXml, 'mod') || extractField(xmlBody, 'mod'),
+    ie: extractField(nfXml, 'IE') || extractField(xmlBody, 'IE'),
+    tpNF: extractField(nfXml, 'tpNF') || extractField(xmlBody, 'tpNF'),
   };
 }
 
@@ -117,7 +145,6 @@ function sendSoap(url, soapBody, certKey, certCrt) {
 // ── Servidor HTTP ───────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -130,14 +157,12 @@ const server = http.createServer(async (req, res) => {
 
   const parsedUrl = new URL(req.url, 'http://localhost');
 
-  // Health check
   if (parsedUrl.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, service: 'proxy-sefaz', timestamp: Date.now() }));
     return;
   }
 
-  // Autenticação
   const expectedSecret = process.env.SKIP_PROXY_SECRET;
   if (expectedSecret) {
     const authHeader = req.headers.authorization || '';
@@ -148,7 +173,6 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Consulta
   if (req.method === 'POST' && parsedUrl.pathname === '/consulta') {
     let body = '';
     for await (const chunk of req) body += chunk;
