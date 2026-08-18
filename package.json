@@ -1,0 +1,12 @@
+{
+  "name": "proxy-sefaz-geocoring",
+  "version": "1.0.0",
+  "description": "Proxy SEFAZ — consulta NFeDistribuicaoDFe com mTLS (e-CNPJ A1)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
